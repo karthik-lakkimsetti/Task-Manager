@@ -1,5 +1,5 @@
 // src/services/api.js
-const BASE_URL = 'https://taskmanager-api.onrender.com';
+const BASE_URL = 'https://taskmanager-api-3wxg.onrender.com';
 const getToken = () => localStorage.getItem('token');
 
 // Helper to handle API responses cleanly

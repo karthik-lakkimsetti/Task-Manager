@@ -15,6 +15,37 @@ app = FastAPI(
     version="1.0.0"
 )
 
+# --- DATABASE AUTO-SETUP ---
+def init_db():
+    conn = database.get_db_connection()
+    if conn:
+        cursor = conn.cursor()
+        # Create Users table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                id SERIAL PRIMARY KEY,
+                email VARCHAR(255) UNIQUE NOT NULL,
+                hashed_password VARCHAR(255) NOT NULL
+            );
+        """)
+        # Create Tasks table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS todo_list (
+                id SERIAL PRIMARY KEY,
+                task_name TEXT NOT NULL,
+                is_completed BOOLEAN DEFAULT FALSE,
+                user_id INTEGER REFERENCES users(id) ON DELETE CASCADE
+            );
+        """)
+        conn.commit()
+        cursor.close()
+        conn.close()
+        print("✅ Database tables initialized!")
+
+@app.on_event("startup")
+async def startup_event():
+    init_db()
+
 # --- SECURITY & JWT CONFIGURATION ---
 SECRET_KEY = "karthik_super_secret_key_2026" 
 ALGORITHM = "HS256"
