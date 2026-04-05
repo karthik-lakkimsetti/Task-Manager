@@ -24,22 +24,21 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
 
 # --- UPDATED CORS SETTINGS ---
-# Replace the Vercel URL with your actual one
+# This allows your specific Vercel frontend to talk to this Render backend
 origins = [
     "http://localhost:5173",
-    "https://task-manager-ui-karthik.vercel.app", # <-- CHANGE THIS TO YOUR VERCEL LINK
-    "*" # Temporary wildcard to ensure it works during your interview
+    "https://task-manager-ui-tau.vercel.app", 
 ]
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], # For the interview, "*" ensures "Failed to Fetch" stops happening
+    allow_origins=origins, 
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# --- DATA SCHEMAS ---
+# --- DATA SCHEMAS (Pydantic) ---
 class UserCreate(BaseModel):
     email: str
     password: str
@@ -47,14 +46,16 @@ class UserCreate(BaseModel):
 class TaskCreate(BaseModel):
     task_name: str
 
-# --- SECURITY HELPERS ---
+# --- SECURITY HELPER FUNCTIONS ---
 def create_access_token(data: dict):
+    """Generates the encrypted JWT Digital ID Card."""
     to_encode = data.copy()
     expire = datetime.now(timezone.utc) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     to_encode.update({"exp": expire})
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
 def get_current_user_id(token: str = Depends(oauth2_scheme)):
+    """Decrypts the token to find out exactly who is making the request."""
     credentials_exception = HTTPException(
         status_code=401,
         detail="Could not validate credentials",
@@ -73,6 +74,7 @@ def get_current_user_id(token: str = Depends(oauth2_scheme)):
 
 @app.post("/register", tags=["Authentication"])
 def register_user(user: UserCreate):
+    """Registers a new user and hashes their password securely."""
     conn = database.get_db_connection()
     if not conn:
         raise HTTPException(status_code=500, detail="Database connection failed")
@@ -86,9 +88,9 @@ def register_user(user: UserCreate):
             (user.email, hashed_password)
         )
         conn.commit()
-    except Exception as e:
+    except Exception:
         conn.rollback()
-        raise HTTPException(status_code=400, detail="Email already registered or DB error")
+        raise HTTPException(status_code=400, detail="Email already registered")
     finally:
         cursor.close()
         conn.close()
@@ -97,11 +99,12 @@ def register_user(user: UserCreate):
 
 @app.post("/login", tags=["Authentication"])
 def login_user(form_data: OAuth2PasswordRequestForm = Depends()):
+    """Logs the user in and hands them a JWT Token."""
     conn = database.get_db_connection()
     if not conn:
         raise HTTPException(status_code=500, detail="Database connection failed")
         
-    # Use RealDictCursor to access data like db_user['id']
+    # RealDictCursor allows accessing data by column name: db_user['id']
     cursor = conn.cursor(cursor_factory=RealDictCursor)
     
     cursor.execute("SELECT * FROM users WHERE email = %s", (form_data.username,))
@@ -116,10 +119,11 @@ def login_user(form_data: OAuth2PasswordRequestForm = Depends()):
     access_token = create_access_token(data={"sub": str(db_user['id'])})
     return {"access_token": access_token, "token_type": "bearer"}
 
-# --- TASK ROUTES ---
+# --- TASK ROUTES (SECURED) ---
 
 @app.get("/tasks", tags=["Tasks"])
 def get_my_tasks(current_user_id: int = Depends(get_current_user_id)):
+    """Fetches tasks belonging ONLY to the currently logged-in user."""
     conn = database.get_db_connection()
     cursor = conn.cursor(cursor_factory=RealDictCursor)
     
@@ -135,6 +139,7 @@ def get_my_tasks(current_user_id: int = Depends(get_current_user_id)):
 
 @app.post("/tasks", tags=["Tasks"])
 def create_new_task(task: TaskCreate, current_user_id: int = Depends(get_current_user_id)):
+    """Creates a new task linked automatically to the logged-in user."""
     conn = database.get_db_connection()
     cursor = conn.cursor()
     try:
@@ -145,15 +150,16 @@ def create_new_task(task: TaskCreate, current_user_id: int = Depends(get_current
         conn.commit()
     except Exception as e:
         conn.rollback()
-        raise HTTPException(status_code=400, detail=f"Failed to add task")
+        raise HTTPException(status_code=400, detail="Failed to add task")
     finally:
         cursor.close()
         conn.close()
         
-    return {"message": f"Successfully added task!"}
+    return {"message": "Successfully added task!"}
 
 @app.put("/tasks/{task_id}", tags=["Tasks"])
 def complete_task(task_id: int, current_user_id: int = Depends(get_current_user_id)):
+    """Marks a task as complete if it belongs to the user."""
     conn = database.get_db_connection()
     cursor = conn.cursor()
     cursor.execute(
@@ -167,6 +173,7 @@ def complete_task(task_id: int, current_user_id: int = Depends(get_current_user_
 
 @app.delete("/tasks/{task_id}", tags=["Tasks"])
 def delete_task(task_id: int, current_user_id: int = Depends(get_current_user_id)):
+    """Deletes a task if it belongs to the user."""
     conn = database.get_db_connection()
     cursor = conn.cursor()
     cursor.execute(
